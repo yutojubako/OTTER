@@ -1,10 +1,10 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-# 
+#
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
 import torch
-import utils.utils as utils
+import OTTER.utils.utils as utils
 
 
 def _has_nan_or_inf(x):

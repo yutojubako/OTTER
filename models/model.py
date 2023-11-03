@@ -1,5 +1,5 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
-# 
+#
 # This source code is licensed under the MIT license found in the
 # LICENSE file in the root directory of this source tree.
 
@@ -7,11 +7,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from models.ema import ExponentialMovingAverage
-from loss.contrastive_loss import ContrastiveLoss
-from loss.kl_div_loss import KLDivLoss
-from models.model_util import concat_all_gather, sinkhorn
-from utils.utils import get_rank
+from OTTER.models.ema import ExponentialMovingAverage
+from OTTER.loss.contrastive_loss import ContrastiveLoss
+from OTTER.loss.kl_div_loss import KLDivLoss
+from OTTER.models.model_util import concat_all_gather, sinkhorn
+from OTTER.utils.utils import get_rank
 
 
 class TextModel(nn.Module):
@@ -283,6 +283,42 @@ class DistillationModel(nn.Module):
     def ema_step(self):
         self.ema_model.update(self.student.parameters())
         self.ema_model.copy_to(self.teacher.parameters())
+
+    def compute_logits(self, features):
+        """
+        Computes image and text logits from embeddings output by encoders.
+        """
+        img_emb = features["img_emb"]  # mc
+        txt_emb = features["txt_emb"]  # mc
+
+        img_gather = concat_all_gather(img_emb)  # nc
+        txt_gather = concat_all_gather(txt_emb)  # nc
+
+        img_logits = torch.einsum('mc,nc->mn', [img_emb, txt_gather])  # mn
+        txt_logits = torch.einsum('mc,nc->mn', [txt_emb, img_gather])  # mn
+        return img_logits, txt_logits
+
+    def compute_sims(self, features):
+        """
+        Computes similarity matrices used in the optimal transport module.
+        """
+        img_emb = features["img_emb"]  # mc
+        txt_emb = features["txt_emb"]  # mc
+
+        img_gather = concat_all_gather(img_emb)  # nc
+        txt_gather = concat_all_gather(txt_emb)  # nc
+
+        vt_sim = torch.einsum('mc,nc->mn', [img_emb, txt_gather])
+        tv_sim = torch.einsum('mc,nc->mn', [txt_emb, img_gather])
+        vv_sim = torch.einsum("mc,nc->mn", [img_emb, img_gather])
+        tt_sim = torch.einsum("mc,nc->mn", [txt_emb, txt_gather])
+
+        return {
+            "vv_sim": vv_sim,
+            "tt_sim": tt_sim,
+            "vt_sim": vt_sim,
+            "tv_sim": tv_sim,
+        }
 
     def forward(self, images, texts):
         losses = {}
